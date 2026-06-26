@@ -2,24 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/utils/supabaseAdmin";
 
 export async function POST(req: NextRequest) {
-  // Log every header so we can see the exact name Hotmart uses in Vercel logs
-  const allHeaders: Record<string, string> = {};
-  req.headers.forEach((value, key) => {
-    allHeaders[key] = value;
-  });
-  console.log("[webhook] incoming headers:", JSON.stringify(allHeaders));
-
   const expectedToken = process.env.HOTMART_TOKEN;
+
   if (!expectedToken) {
     console.error("[webhook] HOTMART_TOKEN is not defined in environment variables");
   }
 
-  // Try every known variation of the Hotmart token header
+  // Hotmart sends the token in the header 'X-HOTMART-HOTTOK' (normalized to lowercase by HTTP)
   const token =
-    req.headers.get("x-hotmart-hottok") ??
-    req.headers.get("x-hotmart-hottoken") ??
-    req.headers.get("hottok") ??
-    null;
+    req.headers.get("x-hotmart-hottok") ||
+    req.headers.get("X-HOTMART-HOTTOK");
 
   console.log("[webhook] token received:", token ?? "NONE");
   console.log("[webhook] token expected:", expectedToken ? "SET" : "NOT SET");

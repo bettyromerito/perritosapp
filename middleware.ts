@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isPublicRoute =
     pathname.startsWith("/login") || pathname.startsWith("/auth");
@@ -30,13 +30,10 @@ export async function proxy(request: NextRequest) {
       }
     );
 
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
+    const { data: { user }, error } = await supabase.auth.getUser();
 
     if (error) {
-      console.error("[proxy] getUser error:", error.message);
+      console.error("[middleware] getUser error:", error.message);
     }
 
     if (!user && !isPublicRoute) {
@@ -53,8 +50,7 @@ export async function proxy(request: NextRequest) {
 
     return supabaseResponse;
   } catch (err) {
-    // Fail closed: any unexpected error redirects to login instead of exposing the dashboard
-    console.error("[proxy] unexpected error, redirecting to login:", err);
+    console.error("[middleware] unexpected error, redirecting to login:", err);
     if (!isPublicRoute) {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/login";
@@ -66,5 +62,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icons|apple-touch-icon|manifest.json|api/webhook|.*\\..*).*)"],
+    "/",
+    "/((?!_next/static|_next/image|favicon.ico|api|login).*)",
+  ],
 };
