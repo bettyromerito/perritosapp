@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/utils/supabaseClient";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WeightEntry {
@@ -24,20 +25,20 @@ interface DailyLog {
   notes: string;
 }
 
-// ── Seed data ──────────────────────────────────────────────────────────────
-const seedWeights: WeightEntry[] = [
+// ── Fallback data (shown when DB is empty) ─────────────────────────────────
+const fallbackWeights: WeightEntry[] = [
   { id: 1, date: "2026-06-01", weight_kg: 8.2 },
   { id: 2, date: "2026-06-10", weight_kg: 8.5 },
   { id: 3, date: "2026-06-20", weight_kg: 8.4 },
 ];
 
-const seedVaccines: Vaccine[] = [
+const fallbackVaccines: Vaccine[] = [
   { id: 1, name: "Antirrábica", date_applied: "2026-01-15", next_dose: "2027-01-15" },
   { id: 2, name: "Parvovirus", date_applied: "2025-11-20", next_dose: "2026-11-20" },
   { id: 3, name: "Moquillo", date_applied: "2025-11-20", next_dose: "2026-11-20" },
 ];
 
-const seedLogs: DailyLog[] = [
+const fallbackLogs: DailyLog[] = [
   { id: 1, date: "2026-06-24", food_type: "Pienso seco", portions: 2, notes: "Comió todo" },
   { id: 2, date: "2026-06-25", food_type: "Comida húmeda", portions: 1, notes: "Le gustó mucho" },
   { id: 3, date: "2026-06-26", food_type: "Pienso seco", portions: 2, notes: "" },
@@ -54,42 +55,89 @@ function isUpcoming(dateStr: string) {
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function Dashboard() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
   // dog_weight_history
-  const [weights, setWeights] = useState<WeightEntry[]>(seedWeights);
+  const [weights, setWeights] = useState<WeightEntry[]>([]);
   const [newWeight, setNewWeight] = useState("");
   const [weightDate, setWeightDate] = useState(today());
 
   // dog_vaccines
-  const [vaccines, setVaccines] = useState<Vaccine[]>(seedVaccines);
+  const [vaccines, setVaccines] = useState<Vaccine[]>([]);
   const [newVaccine, setNewVaccine] = useState({ name: "", date_applied: today(), next_dose: "" });
 
   // dog_daily_logs
-  const [logs, setLogs] = useState<DailyLog[]>(seedLogs);
+  const [logs, setLogs] = useState<DailyLog[]>([]);
   const [newLog, setNewLog] = useState({ food_type: "", portions: 1, notes: "", date: today() });
 
   // active tab
   const [tab, setTab] = useState<"weight" | "vaccines" | "food">("weight");
 
+  // ── Load data from Supabase on mount ────────────────────────────────────
+  useEffect(() => {
+    async function fetchAll() {
+      setLoading(true);
+      try {
+        const [weightsRes, vaccinesRes, logsRes] = await Promise.all([
+          supabase.from("dog_weight_history").select("*").order("date", { ascending: true }),
+          supabase.from("dog_vaccines").select("*").order("date_applied", { ascending: true }),
+          supabase.from("dog_daily_logs").select("*").order("date", { ascending: true }),
+        ]);
+
+        setWeights(weightsRes.data && weightsRes.data.length > 0 ? weightsRes.data : fallbackWeights);
+        setVaccines(vaccinesRes.data && vaccinesRes.data.length > 0 ? vaccinesRes.data : fallbackVaccines);
+        setLogs(logsRes.data && logsRes.data.length > 0 ? logsRes.data : fallbackLogs);
+      } catch {
+        setWeights(fallbackWeights);
+        setVaccines(fallbackVaccines);
+        setLogs(fallbackLogs);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchAll();
+  }, []);
+
   // ── Handlers ────────────────────────────────────────────────────────────
-  function addWeight() {
+  async function addWeight() {
     if (!newWeight) return;
-    setWeights((prev) => [
-      ...prev,
-      { id: Date.now(), date: weightDate, weight_kg: parseFloat(newWeight) },
-    ]);
+    const entry = { date: weightDate, weight_kg: parseFloat(newWeight) };
+    setSaving(true);
+    const { data, error } = await supabase.from("dog_weight_history").insert(entry).select().single();
+    setSaving(false);
+    if (!error && data) {
+      setWeights((prev) => [...prev, data]);
+    } else {
+      setWeights((prev) => [...prev, { id: Date.now(), ...entry }]);
+    }
     setNewWeight("");
     setWeightDate(today());
   }
 
-  function addVaccine() {
+  async function addVaccine() {
     if (!newVaccine.name) return;
-    setVaccines((prev) => [...prev, { id: Date.now(), ...newVaccine }]);
+    setSaving(true);
+    const { data, error } = await supabase.from("dog_vaccines").insert(newVaccine).select().single();
+    setSaving(false);
+    if (!error && data) {
+      setVaccines((prev) => [...prev, data]);
+    } else {
+      setVaccines((prev) => [...prev, { id: Date.now(), ...newVaccine }]);
+    }
     setNewVaccine({ name: "", date_applied: today(), next_dose: "" });
   }
 
-  function addLog() {
+  async function addLog() {
     if (!newLog.food_type) return;
-    setLogs((prev) => [...prev, { id: Date.now(), ...newLog }]);
+    setSaving(true);
+    const { data, error } = await supabase.from("dog_daily_logs").insert(newLog).select().single();
+    setSaving(false);
+    if (!error && data) {
+      setLogs((prev) => [...prev, data]);
+    } else {
+      setLogs((prev) => [...prev, { id: Date.now(), ...newLog }]);
+    }
     setNewLog({ food_type: "", portions: 1, notes: "", date: today() });
   }
 
@@ -110,15 +158,18 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold text-amber-800">PetHealth Dashboard</h1>
             <p className="text-sm text-amber-500">Monitoriza la salud de tu perrito</p>
           </div>
+          {loading && (
+            <span className="ml-auto text-xs text-amber-400 animate-pulse">Cargando datos…</span>
+          )}
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8 space-y-6">
         {/* Stats bar */}
         <div className="grid grid-cols-3 gap-4">
-          <StatCard emoji="⚖️" label="Último peso" value={`${weights.at(-1)?.weight_kg ?? "—"} kg`} color="bg-blue-50 border-blue-200" />
-          <StatCard emoji="💉" label="Vacunas registradas" value={vaccines.length} color="bg-green-50 border-green-200" />
-          <StatCard emoji="🍖" label="Registros de comida" value={logs.length} color="bg-orange-50 border-orange-200" />
+          <StatCard emoji="⚖️" label="Último peso" value={loading ? "…" : `${weights.at(-1)?.weight_kg ?? "—"} kg`} color="bg-blue-50 border-blue-200" />
+          <StatCard emoji="💉" label="Vacunas registradas" value={loading ? "…" : vaccines.length} color="bg-green-50 border-green-200" />
+          <StatCard emoji="🍖" label="Registros de comida" value={loading ? "…" : logs.length} color="bg-orange-50 border-orange-200" />
         </div>
 
         {/* Tabs */}
@@ -146,7 +197,6 @@ export default function Dashboard() {
             <div className="p-6 space-y-6">
               <SectionTitle>Historial de peso</SectionTitle>
 
-              {/* Add form */}
               <div className="flex flex-wrap gap-3 items-end bg-amber-50 p-4 rounded-xl">
                 <Field label="Fecha">
                   <input type="date" value={weightDate} onChange={(e) => setWeightDate(e.target.value)} className={inputCls} />
@@ -155,40 +205,41 @@ export default function Dashboard() {
                   <input type="number" step="0.1" min="0" placeholder="8.5" value={newWeight}
                     onChange={(e) => setNewWeight(e.target.value)} className={inputCls} />
                 </Field>
-                <AddButton onClick={addWeight}>Añadir</AddButton>
+                <AddButton onClick={addWeight} loading={saving}>Añadir</AddButton>
               </div>
 
-              {/* Table */}
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-amber-600 border-b border-amber-100">
-                    <th className="pb-2 font-semibold">Fecha</th>
-                    <th className="pb-2 font-semibold">Peso (kg)</th>
-                    <th className="pb-2 font-semibold">Variación</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...weights].reverse().map((w, i, arr) => {
-                    const prev = arr[i + 1];
-                    const diff = prev ? w.weight_kg - prev.weight_kg : null;
-                    return (
-                      <tr key={w.id} className="border-b border-amber-50 hover:bg-amber-50 transition-colors">
-                        <td className="py-3 text-gray-700">{w.date}</td>
-                        <td className="py-3 font-semibold text-gray-900">{w.weight_kg} kg</td>
-                        <td className="py-3">
-                          {diff !== null ? (
-                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${diff > 0 ? "bg-red-100 text-red-600" : diff < 0 ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
-                              {diff > 0 ? "+" : ""}{diff.toFixed(1)} kg
-                            </span>
-                          ) : (
-                            <span className="text-xs text-gray-400">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              {loading ? <Skeleton rows={3} /> : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-amber-600 border-b border-amber-100">
+                      <th className="pb-2 font-semibold">Fecha</th>
+                      <th className="pb-2 font-semibold">Peso (kg)</th>
+                      <th className="pb-2 font-semibold">Variación</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...weights].reverse().map((w, i, arr) => {
+                      const prev = arr[i + 1];
+                      const diff = prev ? w.weight_kg - prev.weight_kg : null;
+                      return (
+                        <tr key={w.id} className="border-b border-amber-50 hover:bg-amber-50 transition-colors">
+                          <td className="py-3 text-gray-700">{w.date}</td>
+                          <td className="py-3 font-semibold text-gray-900">{w.weight_kg} kg</td>
+                          <td className="py-3">
+                            {diff !== null ? (
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${diff > 0 ? "bg-red-100 text-red-600" : diff < 0 ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
+                                {diff > 0 ? "+" : ""}{diff.toFixed(1)} kg
+                              </span>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
 
@@ -210,25 +261,27 @@ export default function Dashboard() {
                   <input type="date" value={newVaccine.next_dose}
                     onChange={(e) => setNewVaccine((v) => ({ ...v, next_dose: e.target.value }))} className={inputCls} />
                 </Field>
-                <AddButton onClick={addVaccine}>Añadir</AddButton>
+                <AddButton onClick={addVaccine} loading={saving}>Añadir</AddButton>
               </div>
 
-              <div className="space-y-3">
-                {vaccines.map((v) => (
-                  <div key={v.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-green-200 transition-colors">
-                    <div>
-                      <p className="font-semibold text-gray-800">{v.name}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">Aplicada: {v.date_applied}</p>
+              {loading ? <Skeleton rows={3} /> : (
+                <div className="space-y-3">
+                  {vaccines.map((v) => (
+                    <div key={v.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-100 hover:border-green-200 transition-colors">
+                      <div>
+                        <p className="font-semibold text-gray-800">{v.name}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">Aplicada: {v.date_applied}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500">Próxima dosis</p>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isUpcoming(v.next_dose) ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
+                          {v.next_dose || "—"}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-500">Próxima dosis</p>
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${isUpcoming(v.next_dose) ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>
-                        {v.next_dose || "—"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -254,25 +307,27 @@ export default function Dashboard() {
                   <input placeholder="Opcional" value={newLog.notes}
                     onChange={(e) => setNewLog((l) => ({ ...l, notes: e.target.value }))} className={inputCls} />
                 </Field>
-                <AddButton onClick={addLog}>Añadir</AddButton>
+                <AddButton onClick={addLog} loading={saving}>Añadir</AddButton>
               </div>
 
-              <div className="space-y-3">
-                {[...logs].reverse().map((l) => (
-                  <div key={l.id} className="flex items-start justify-between p-4 rounded-xl border border-gray-100 hover:border-orange-200 transition-colors">
-                    <div>
-                      <p className="font-semibold text-gray-800">{l.food_type}</p>
-                      {l.notes && <p className="text-xs text-gray-500 mt-0.5">{l.notes}</p>}
+              {loading ? <Skeleton rows={3} /> : (
+                <div className="space-y-3">
+                  {[...logs].reverse().map((l) => (
+                    <div key={l.id} className="flex items-start justify-between p-4 rounded-xl border border-gray-100 hover:border-orange-200 transition-colors">
+                      <div>
+                        <p className="font-semibold text-gray-800">{l.food_type}</p>
+                        {l.notes && <p className="text-xs text-gray-500 mt-0.5">{l.notes}</p>}
+                      </div>
+                      <div className="text-right shrink-0 ml-4">
+                        <p className="text-xs text-gray-400">{l.date}</p>
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
+                          {l.portions} {l.portions === 1 ? "porción" : "porciones"}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0 ml-4">
-                      <p className="text-xs text-gray-400">{l.date}</p>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
-                        {l.portions} {l.portions === 1 ? "porción" : "porciones"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -307,11 +362,21 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function AddButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+function AddButton({ onClick, loading, children }: { onClick: () => void; loading?: boolean; children: React.ReactNode }) {
   return (
-    <button onClick={onClick}
-      className="h-9 px-5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium transition-colors">
-      {children}
+    <button onClick={onClick} disabled={loading}
+      className="h-9 px-5 rounded-lg bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+      {loading ? "…" : children}
     </button>
+  );
+}
+
+function Skeleton({ rows }: { rows: number }) {
+  return (
+    <div className="space-y-3 animate-pulse">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="h-12 bg-amber-50 rounded-xl" />
+      ))}
+    </div>
   );
 }
