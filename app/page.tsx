@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
+import type { User } from "@supabase/supabase-js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WeightEntry {
@@ -31,13 +33,11 @@ const fallbackWeights: WeightEntry[] = [
   { id: 2, date: "2026-06-10", weight_kg: 8.5 },
   { id: 3, date: "2026-06-20", weight_kg: 8.4 },
 ];
-
 const fallbackVaccines: Vaccine[] = [
   { id: 1, name: "Antirrábica", date_applied: "2026-01-15", next_dose: "2027-01-15" },
   { id: 2, name: "Parvovirus", date_applied: "2025-11-20", next_dose: "2026-11-20" },
   { id: 3, name: "Moquillo", date_applied: "2025-11-20", next_dose: "2026-11-20" },
 ];
-
 const fallbackLogs: DailyLog[] = [
   { id: 1, date: "2026-06-24", food_type: "Pienso seco", portions: 2, notes: "Comió todo" },
   { id: 2, date: "2026-06-25", food_type: "Comida húmeda", portions: 1, notes: "Le gustó mucho" },
@@ -48,14 +48,17 @@ const fallbackLogs: DailyLog[] = [
 function today() {
   return new Date().toISOString().split("T")[0];
 }
-
 function isUpcoming(dateStr: string) {
   return new Date(dateStr) > new Date();
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  const [authLoading, setAuthLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // dog_weight_history
@@ -74,15 +77,40 @@ export default function Dashboard() {
   // active tab
   const [tab, setTab] = useState<"weight" | "vaccines" | "food">("weight");
 
-  // ── Load data from Supabase on mount ────────────────────────────────────
+  // ── Auth: check session, listen for changes ──────────────────────────────
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      setUser(session.user);
+      setAuthLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      setUser(session.user);
+      setAuthLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  // ── Load data once user is confirmed ────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+
     async function fetchAll() {
       setLoading(true);
       try {
         const [weightsRes, vaccinesRes, logsRes] = await Promise.all([
-          supabase.from("dog_weight_history").select("*").order("date", { ascending: true }),
-          supabase.from("dog_vaccines").select("*").order("date_applied", { ascending: true }),
-          supabase.from("dog_daily_logs").select("*").order("date", { ascending: true }),
+          supabase.from("dog_weight_history").select("*").eq("user_id", user!.id).order("date", { ascending: true }),
+          supabase.from("dog_vaccines").select("*").eq("user_id", user!.id).order("date_applied", { ascending: true }),
+          supabase.from("dog_daily_logs").select("*").eq("user_id", user!.id).order("date", { ascending: true }),
         ]);
 
         setWeights(weightsRes.data && weightsRes.data.length > 0 ? weightsRes.data : fallbackWeights);
@@ -96,49 +124,57 @@ export default function Dashboard() {
         setLoading(false);
       }
     }
+
     fetchAll();
-  }, []);
+  }, [user]);
 
   // ── Handlers ────────────────────────────────────────────────────────────
   async function addWeight() {
-    if (!newWeight) return;
-    const entry = { date: weightDate, weight_kg: parseFloat(newWeight) };
+    if (!newWeight || !user) return;
+    const entry = { date: weightDate, weight_kg: parseFloat(newWeight), user_id: user.id };
     setSaving(true);
     const { data, error } = await supabase.from("dog_weight_history").insert(entry).select().single();
     setSaving(false);
-    if (!error && data) {
-      setWeights((prev) => [...prev, data]);
-    } else {
-      setWeights((prev) => [...prev, { id: Date.now(), ...entry }]);
-    }
+    setWeights((prev) => [...prev, error || !data ? { id: Date.now(), ...entry } : data]);
     setNewWeight("");
     setWeightDate(today());
   }
 
   async function addVaccine() {
-    if (!newVaccine.name) return;
+    if (!newVaccine.name || !user) return;
+    const entry = { ...newVaccine, user_id: user.id };
     setSaving(true);
-    const { data, error } = await supabase.from("dog_vaccines").insert(newVaccine).select().single();
+    const { data, error } = await supabase.from("dog_vaccines").insert(entry).select().single();
     setSaving(false);
-    if (!error && data) {
-      setVaccines((prev) => [...prev, data]);
-    } else {
-      setVaccines((prev) => [...prev, { id: Date.now(), ...newVaccine }]);
-    }
+    setVaccines((prev) => [...prev, error || !data ? { id: Date.now(), ...entry } : data]);
     setNewVaccine({ name: "", date_applied: today(), next_dose: "" });
   }
 
   async function addLog() {
-    if (!newLog.food_type) return;
+    if (!newLog.food_type || !user) return;
+    const entry = { ...newLog, user_id: user.id };
     setSaving(true);
-    const { data, error } = await supabase.from("dog_daily_logs").insert(newLog).select().single();
+    const { data, error } = await supabase.from("dog_daily_logs").insert(entry).select().single();
     setSaving(false);
-    if (!error && data) {
-      setLogs((prev) => [...prev, data]);
-    } else {
-      setLogs((prev) => [...prev, { id: Date.now(), ...newLog }]);
-    }
+    setLogs((prev) => [...prev, error || !data ? { id: Date.now(), ...entry } : data]);
     setNewLog({ food_type: "", portions: 1, notes: "", date: today() });
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
+
+  // ── Auth loading screen ─────────────────────────────────────────────────
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-amber-50 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <span className="text-5xl animate-bounce inline-block">🐶</span>
+          <p className="text-amber-500 text-sm">Verificando sesión…</p>
+        </div>
+      </div>
+    );
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -158,9 +194,15 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold text-amber-800">PetHealth Dashboard</h1>
             <p className="text-sm text-amber-500">Monitoriza la salud de tu perrito</p>
           </div>
-          {loading && (
-            <span className="ml-auto text-xs text-amber-400 animate-pulse">Cargando datos…</span>
-          )}
+          <div className="ml-auto flex items-center gap-3">
+            {loading && <span className="text-xs text-amber-400 animate-pulse">Cargando…</span>}
+            <div className="text-right">
+              <p className="text-xs text-gray-400 truncate max-w-[160px]">{user?.email}</p>
+              <button onClick={handleSignOut} className="text-xs text-amber-500 hover:text-amber-700 underline">
+                Cerrar sesión
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -196,7 +238,6 @@ export default function Dashboard() {
           {tab === "weight" && (
             <div className="p-6 space-y-6">
               <SectionTitle>Historial de peso</SectionTitle>
-
               <div className="flex flex-wrap gap-3 items-end bg-amber-50 p-4 rounded-xl">
                 <Field label="Fecha">
                   <input type="date" value={weightDate} onChange={(e) => setWeightDate(e.target.value)} className={inputCls} />
@@ -207,7 +248,6 @@ export default function Dashboard() {
                 </Field>
                 <AddButton onClick={addWeight} loading={saving}>Añadir</AddButton>
               </div>
-
               {loading ? <Skeleton rows={3} /> : (
                 <table className="w-full text-sm">
                   <thead>
@@ -230,9 +270,7 @@ export default function Dashboard() {
                               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${diff > 0 ? "bg-red-100 text-red-600" : diff < 0 ? "bg-green-100 text-green-600" : "bg-gray-100 text-gray-500"}`}>
                                 {diff > 0 ? "+" : ""}{diff.toFixed(1)} kg
                               </span>
-                            ) : (
-                              <span className="text-xs text-gray-400">—</span>
-                            )}
+                            ) : <span className="text-xs text-gray-400">—</span>}
                           </td>
                         </tr>
                       );
@@ -247,7 +285,6 @@ export default function Dashboard() {
           {tab === "vaccines" && (
             <div className="p-6 space-y-6">
               <SectionTitle>Registro de vacunas</SectionTitle>
-
               <div className="flex flex-wrap gap-3 items-end bg-green-50 p-4 rounded-xl">
                 <Field label="Vacuna">
                   <input placeholder="Nombre" value={newVaccine.name}
@@ -263,7 +300,6 @@ export default function Dashboard() {
                 </Field>
                 <AddButton onClick={addVaccine} loading={saving}>Añadir</AddButton>
               </div>
-
               {loading ? <Skeleton rows={3} /> : (
                 <div className="space-y-3">
                   {vaccines.map((v) => (
@@ -289,7 +325,6 @@ export default function Dashboard() {
           {tab === "food" && (
             <div className="p-6 space-y-6">
               <SectionTitle>Registro de comida diaria</SectionTitle>
-
               <div className="flex flex-wrap gap-3 items-end bg-orange-50 p-4 rounded-xl">
                 <Field label="Fecha">
                   <input type="date" value={newLog.date}
@@ -309,7 +344,6 @@ export default function Dashboard() {
                 </Field>
                 <AddButton onClick={addLog} loading={saving}>Añadir</AddButton>
               </div>
-
               {loading ? <Skeleton rows={3} /> : (
                 <div className="space-y-3">
                   {[...logs].reverse().map((l) => (
