@@ -2,27 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/utils/supabaseAdmin";
 
 export async function POST(req: NextRequest) {
-  // Headers are case-insensitive per HTTP spec; Next.js normalizes to lowercase
-  const token =
-    req.headers.get("x-hotmart-hottoken") ??
-    req.headers.get("X-Hotmart-HotToken") ??
-    req.headers.get("X-Hotmart-Hottoken");
+  // Log every header so we can see the exact name Hotmart uses in Vercel logs
+  const allHeaders: Record<string, string> = {};
+  req.headers.forEach((value, key) => {
+    allHeaders[key] = value;
+  });
+  console.log("[webhook] incoming headers:", JSON.stringify(allHeaders));
 
   const expectedToken = process.env.HOTMART_TOKEN;
-
   if (!expectedToken) {
-    console.error("[webhook] HOTMART_TOKEN env var is not defined — check Vercel environment variables");
+    console.error("[webhook] HOTMART_TOKEN is not defined in environment variables");
   }
 
-  console.log("[webhook] received token:", token ? "present" : "missing");
-  console.log("[webhook] expected token:", expectedToken ? "defined" : "UNDEFINED");
+  // Try every known variation of the Hotmart token header
+  const token =
+    req.headers.get("x-hotmart-hottok") ??
+    req.headers.get("x-hotmart-hottoken") ??
+    req.headers.get("hottok") ??
+    null;
+
+  console.log("[webhook] token received:", token ?? "NONE");
+  console.log("[webhook] token expected:", expectedToken ? "SET" : "NOT SET");
 
   if (!expectedToken || token !== expectedToken) {
+    console.error("[webhook] 401 — token mismatch or missing");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const body = await req.json();
-
   console.log("[webhook] event:", body.event);
 
   if (body.event === "PURCHASE_APPROVED") {
@@ -39,10 +46,9 @@ export async function POST(req: NextRequest) {
         console.log("[webhook] Invitation sent to:", email);
       }
     } catch (err) {
-      console.error("[webhook] Unexpected error:", err);
+      console.error("[webhook] Unexpected error calling Supabase:", err);
     }
   }
 
-  // Always return 200 so Hotmart does not retry the webhook
   return NextResponse.json({ received: true }, { status: 200 });
 }
