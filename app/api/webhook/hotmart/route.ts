@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/utils/supabaseAdmin";
+import { getSupabaseAdmin } from "@/utils/supabaseAdmin";
 
 export async function POST(req: NextRequest) {
   const token = req.headers.get("X-Hotmart-Hottoken");
@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
 
     console.log("PURCHASE_APPROVED →", { email, name });
 
-    const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email);
+    const { error } = await getSupabaseAdmin().auth.admin.inviteUserByEmail(email);
 
     if (error) {
       console.error("Error inviting user:", error.message);
