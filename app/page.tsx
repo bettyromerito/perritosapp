@@ -1,12 +1,11 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import type { User } from "@supabase/supabase-js";
-
-// Middleware already blocks unauthenticated requests server-side.
-// The client-side check here only resolves the user object for queries.
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WeightEntry {
@@ -167,8 +166,8 @@ export default function Dashboard() {
     router.replace("/login");
   }
 
-  // ── Auth loading screen ─────────────────────────────────────────────────
-  if (authLoading) {
+  // ── Block render until session is confirmed ─────────────────────────────
+  if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-amber-50 flex items-center justify-center">
         <div className="text-center space-y-3">
@@ -179,7 +178,7 @@ export default function Dashboard() {
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  // ── Render (user is guaranteed non-null beyond this point) ───────────────
   const tabs = [
     { key: "weight", label: "⚖️ Peso" },
     { key: "vaccines", label: "💉 Vacunas" },
