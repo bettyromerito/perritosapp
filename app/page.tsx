@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import type { User } from "@supabase/supabase-js";
 
+// Middleware already blocks unauthenticated requests server-side.
+// The client-side check here only resolves the user object for queries.
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WeightEntry {
   id: number;
@@ -77,24 +80,23 @@ export default function Dashboard() {
   // active tab
   const [tab, setTab] = useState<"weight" | "vaccines" | "food">("weight");
 
-  // ── Auth: check session, listen for changes ──────────────────────────────
+  // ── Resolve authenticated user (middleware already blocked unauth requests) ─
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUser(user);
+      } else {
         router.replace("/login");
-        return;
       }
-      setUser(session.user);
       setAuthLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
+      if (!session?.user) {
         router.replace("/login");
-        return;
+      } else {
+        setUser(session.user);
       }
-      setUser(session.user);
-      setAuthLoading(false);
     });
 
     return () => subscription.unsubscribe();

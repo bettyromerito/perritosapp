@@ -17,7 +17,7 @@ export default function LoginPage() {
     setStatus("loading");
     setErrorMsg("");
 
-    const redirectTo = `${window.location.origin}/`;
+    const redirectTo = `${window.location.origin}/auth/callback`;
 
     const { error } = await supabase.auth.signInWithOtp({
       email,
