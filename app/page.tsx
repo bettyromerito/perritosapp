@@ -7,6 +7,16 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabaseClient";
 import type { User } from "@supabase/supabase-js";
 
+// ── Helpers de cookie (sistema AUTH-SHEETS) ────────────────────────────────
+function getCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(^| )${name}=([^;]+)`));
+  return match ? decodeURIComponent(match[2]) : null;
+}
+function deleteCookie(name: string) {
+  document.cookie = `${name}=; Max-Age=0; path=/;`;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface WeightEntry {
   id: number;
@@ -79,27 +89,42 @@ export default function Dashboard() {
   // active tab
   const [tab, setTab] = useState<"weight" | "vaccines" | "food">("weight");
 
-  // ── Resolve authenticated user (middleware already blocked unauth requests) ─
+  // ── AUTH-SHEETS: verificar cookie user_session ────────────────────────────
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        setUser(user);
-      } else {
-        router.replace("/login");
-      }
-      setAuthLoading(false);
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session?.user) {
-        router.replace("/login");
-      } else {
-        setUser(session.user);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    const sessionEmail = getCookie("user_session");
+    if (!sessionEmail) {
+      router.replace("/login");
+      return;
+    }
+    // Simula un objeto User mínimo para que el resto del componente funcione
+    setUser({ id: "", email: sessionEmail } as unknown as User);
+    setAuthLoading(false);
   }, [router]);
+
+  // ── CÓDIGO ORIGINAL SUPABASE — NO BORRAR ──────────────────────────────────
+  // Para reactivar: comenta el useEffect de arriba y descomenta el de abajo.
+  //
+  // useEffect(() => {
+  //   supabase.auth.getUser().then(({ data: { user } }) => {
+  //     if (user) {
+  //       setUser(user);
+  //     } else {
+  //       router.replace("/login");
+  //     }
+  //     setAuthLoading(false);
+  //   });
+  //
+  //   const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+  //     if (!session?.user) {
+  //       router.replace("/login");
+  //     } else {
+  //       setUser(session.user);
+  //     }
+  //   });
+  //
+  //   return () => subscription.unsubscribe();
+  // }, [router]);
+  // ──────────────────────────────────────────────────────────────────────────
 
   // ── Load data once user is confirmed ────────────────────────────────────
   useEffect(() => {
@@ -162,8 +187,10 @@ export default function Dashboard() {
   }
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
+    // AUTH-SHEETS: limpia la cookie de sesión
+    deleteCookie("user_session");
     router.replace("/login");
+    // Código original Supabase: await supabase.auth.signOut();
   }
 
   // ── Block render until session is confirmed ─────────────────────────────
