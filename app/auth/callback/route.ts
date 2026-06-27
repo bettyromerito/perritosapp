@@ -30,10 +30,21 @@ export async function GET(request: NextRequest) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}/`);
+      // In Vercel production, origin is the internal URL — use x-forwarded-host instead
+      const forwardedHost = request.headers.get("x-forwarded-host");
+      const redirectBase =
+        forwardedHost && process.env.NODE_ENV === "production"
+          ? `https://${forwardedHost}`
+          : origin;
+      return NextResponse.redirect(`${redirectBase}/`);
     }
   }
 
   // If something went wrong, send back to login
-  return NextResponse.redirect(`${origin}/login`);
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const redirectBase =
+    forwardedHost && process.env.NODE_ENV === "production"
+      ? `https://${forwardedHost}`
+      : origin;
+  return NextResponse.redirect(`${redirectBase}/login`);
 }
